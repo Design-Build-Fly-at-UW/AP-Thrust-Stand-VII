@@ -62,7 +62,7 @@ float mahDrawn = 0;
 const int SD_CS_PIN = 53;     // Change if your module uses a different CS
 File dataFile; //used for the arduino to write to
 const int flushPeriodMillis = 5000; //this is how often the arduino will flush (save to the SD card) while doing a test
-int lastFlush = 0; 
+unsigned long lastFlush = 0; 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //LOAD CELLS
@@ -376,7 +376,7 @@ void valueEditMenu(long* value, const char* label){ //pass this method a pointer
         return;
     }
 
-    int startTime = millis(); //we track how long since it started so that we can time out
+    unsigned long startTime = millis(); //we track how long since it started so that we can time out
     Serial.print("Value is: "); Serial.println(*value);
     Serial.print("Label is: "); Serial.println(label);
     //set up the input string
@@ -702,7 +702,7 @@ void zeroAnalog(){
     u8g2.drawStr(14, 39, "Zeroing");
     u8g2.sendBuffer();
 
-    VOLTAGE_OFFSET = VOLTAGE_OFFSET + findAnalogOffset(getVoltage);
+    //only the current sensor is zeroed. The voltage divider reads 0 at 0V already, and zeroing it with a battery plugged in would make voltage read 0
     CURRENT_OFFSET = CURRENT_OFFSET + findAnalogOffset(getCurrent);
 }
 
@@ -786,9 +786,9 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
     electricPower = abs(voltage*current); //watts
     mechanicalPower = abs(torque*RPM*0.1047/1000); //RPM is converted to Rad/S, torque is converted to N.m from N.mm
     propellerPower = abs(thrust*airspeed/1000); //
-    motorEfficiency = abs(mechanicalPower/electricPower);
-    propellerEfficiency = abs(propellerPower/mechanicalPower);
-    systemEfficiency = abs(propellerPower/electricPower);
+    motorEfficiency = (electricPower > 0) ? abs(mechanicalPower/electricPower)*100 : 0; //percent
+    propellerEfficiency = (mechanicalPower > 0) ? abs(propellerPower/mechanicalPower)*100 : 0; //percent
+    systemEfficiency = (electricPower > 0) ? abs(propellerPower/electricPower)*100 : 0; //percent
     mahDrawn += current*((float)millis() - (testTime + testStartTime))/((float)3600);
     Serial.println(millis());
     Serial.println(current);
@@ -965,12 +965,13 @@ boolean batteryTestParameterReviewScreen(){
     u8g2.setFont(u8g2_font_t0_12b_mf);
     u8g2.setCursor(1, 13); u8g2.print("Battery Params:"); 
     u8g2.drawLine(0, 14, 128, 14); //draw line across bottom
-    u8g2.setFont(u8g2_font_5x7_tr);
-    u8g2.setCursor(1, 22); u8g2.print("Discharge (mAh): "); u8g2.print(dischargeAmount);
-    u8g2.setCursor(1, 29); u8g2.print("Current Draw (A): "); u8g2.print(intervalTime);
-    u8g2.setCursor(1, 36); u8g2.print("Gain (ms): "); u8g2.print(testThrottleMax);
-    u8g2.setCursor(1, 43); u8g2.print("Voltage Cutoff (V): "); u8g2.print(voltageCuttoff); 
-    u8g2.setCursor(1, 50); u8g2.print("Sag Recover Time (s): "); u8g2.print(batteryRecoveryTime); 
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.setCursor(1, 21); u8g2.print("Discharge (mAh): "); u8g2.print(dischargeAmount);
+    u8g2.setCursor(1, 28); u8g2.print("Current Draw (A): "); u8g2.print(targetAmpDraw);
+    u8g2.setCursor(1, 35); u8g2.print("Max Throttle (%): "); u8g2.print(testThrottleMax);
+    u8g2.setCursor(1, 42); u8g2.print("Gain (ms): "); u8g2.print(currentTestGain);
+    u8g2.setCursor(1, 49); u8g2.print("Voltage Cutoff (V): "); u8g2.print(voltageCuttoff); 
+    u8g2.setCursor(1, 56); u8g2.print("Sag Recover Time (s): "); u8g2.print(batteryRecoveryTime); 
     u8g2.setFont(u8g2_font_4x6_mr);
     u8g2.drawStr(2, 62, "* to go back, # to continue"); 
     u8g2.sendBuffer();
@@ -1197,10 +1198,10 @@ void selectProfile(){
 
 //helper method
 void setThrottle(float throttleSetting){ //pass this a throttle from 0-100 and it will safely write it to the ESC
-    int throttleMicroseconds = ((throttleSetting/100.0)*(MAX_THROTTLE-MIN_THROTTLE)+MIN_THROTTLE);
+    int throttleMicroseconds = MIN_THROTTLE;
 
-    if (throttleSetting > 100 || throttleSetting < 0){ //if the throttle is out of bounds, set it to 0
-        throttleMicroseconds = MIN_THROTTLE;
+    if (!isnan(throttleSetting) && throttleSetting <= 100 && throttleSetting >= 0){ //if the throttle is out of bounds or not a number, leave it at 0
+        throttleMicroseconds = ((throttleSetting/100.0)*(MAX_THROTTLE-MIN_THROTTLE)+MIN_THROTTLE);
     }
     
     esc.writeMicroseconds(throttleMicroseconds);
@@ -1342,13 +1343,12 @@ void runPiecewiseTest(){
         return;
     }
 
-    wdt_enable(WDTO_2S);
-    wdt_reset();
-
     resetSensorData();
 
     bool testRunning = true;
     while(testRunning){
+        wdt_enable(WDTO_2S); //enabled every run, since it gets disabled while waiting on the user between props
+        wdt_reset();
         steppedRamp();
 
         throttle = 0;
@@ -1555,6 +1555,10 @@ void runBatteryTest(){
 }
 
 void runTest(){//this method is in charge of deciding which test to run and then running it
+    if (testThrottleMax > 100) { //setThrottle cuts the motor above 100%, so cap it here before any test uses it
+        testThrottleMax = 100;
+    }
+
     if(testType == 1){ //run smooth ramp test
         runSmoothRampTest();
     }
@@ -1574,7 +1578,7 @@ void runTest(){//this method is in charge of deciding which test to run and then
 
 void setup() {
     u8g2.begin();
-    Serial.begin(9600); // Start serial communication
+    Serial.begin(115200); // Start serial communication. Keep this fast, the debug prints block the test loop when the serial buffer fills
     Serial.println("Keypad Ready");
 
     drawLoadingScreen(0, "Attaching pins");
@@ -1606,8 +1610,8 @@ void setup() {
     torqueSensor2.tare();
     thrustSensor.tare();
 
-    drawLoadingScreen(40, "Analog Zeroing");
-    //zeroAnalog(); skipping this currently
+    drawLoadingScreen(40, "Current Sensor Zeroing");
+    CURRENT_OFFSET = findAnalogOffset(getCurrent); //no current is flowing at startup, so this is the sensor's zero point
 
     drawLoadingScreen(50, "Loading Calibration Factors");
     float torqueSensorScale;
