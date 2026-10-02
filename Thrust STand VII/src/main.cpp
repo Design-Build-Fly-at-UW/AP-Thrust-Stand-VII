@@ -29,6 +29,7 @@ extern void selectProfile();
 
 #define THST_CAL_ADDRESS 0
 #define TRQ_CAL_ADDRESS 100 //make sure this is sufficiently spaced from thst cal to avoid overwriting
+#define TRQ2_CAL_ADDRESS 200 //second torque sensor calibration
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //Test Variables;
@@ -37,7 +38,9 @@ const int testDataInterval = 200; //in milliseconds, the amount of time between 
 float testStartTime = 0;
 float testTime = 0; //ms
 float thrust = 0; //mN
-float torque = 0; //N.mm
+float torque = 0; //N.mm, average of both torque sensors
+float torque1 = 0; //N.mm, torque sensor 1
+float torque2 = 0; //N.mm, torque sensor 2
 float airspeed = 0; //m/s
 float current = 0; //amps
 float voltage = 0; //volts
@@ -66,9 +69,12 @@ int lastFlush = 0;
 
 HX711 thrustSensor;
 HX711 torqueSensor;
+HX711 torqueSensor2;
 
 #define TRQ_DOUT 48
 #define TRQ_CLK 49
+#define TRQ2_DOUT 44
+#define TRQ2_CLK 45
 #define TRQ_UNITS "(N.mm)"
 
 #define THST_DOUT 46
@@ -77,6 +83,7 @@ HX711 torqueSensor;
 
 extern void tareTorque(); //these need to be here so the menu structure knows these exist before they're declared in the file
 extern void calibrateTorque();
+extern void calibrateTorque2();
 
 extern void tareThrust();
 extern void calibrateThrust();
@@ -273,7 +280,8 @@ MenuItem menus[] = {
         {32, "Zero Thrust", TYPE_ACTION, 3, NULL, tareThrust},
         {33, "Zero Torque", TYPE_ACTION, 3, NULL, tareTorque},
         {34, "Calibrate Thrust Sensor", TYPE_ACTION, 3, NULL, calibrateThrust},
-        {35, "Calibrate Torque Sensor", TYPE_ACTION, 3, NULL, calibrateTorque},
+        {35, "Calibrate Torque 1", TYPE_ACTION, 3, NULL, calibrateTorque},
+        {37, "Calibrate Torque 2", TYPE_ACTION, 3, NULL, calibrateTorque2},
         {36, "Zero Analog", TYPE_ACTION, 3, NULL, zeroAnalog},
 
     {4, "Debug", TYPE_ACTION, 0, NULL, debugMenu},
@@ -607,6 +615,7 @@ void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and th
 
 void tareTorque(){
     tareLoadCell(&torqueSensor);
+    torqueSensor2.tare(); //both torque sensors are unloaded at this point, so tare the second one too
 }
 
 void tareThrust(){
@@ -617,6 +626,11 @@ void tareThrust(){
 void calibrateTorque(){ //helper function for the menu, calls calibrateLoadCell
     calibrateLoadCell(&torqueSensor, TRQ_UNITS);
     EEPROM.put(TRQ_CAL_ADDRESS, torqueSensor.get_scale()); //write the scale to EEPROM
+}
+
+void calibrateTorque2(){ //helper function for the menu, calls calibrateLoadCell
+    calibrateLoadCell(&torqueSensor2, TRQ_UNITS);
+    EEPROM.put(TRQ2_CAL_ADDRESS, torqueSensor2.get_scale()); //write the scale to EEPROM
 }
 
 void calibrateThrust(){//helper function for the menu, calls calibrateLoadCell
@@ -720,6 +734,8 @@ void resetSensorData(){ //call to reset all sensor state variables to 0
     testTime = 0;
     thrust = 0;
     torque = 0;
+    torque1 = 0;
+    torque2 = 0;
     airspeed = 0;
     current = 0;
     voltage = 0;
@@ -750,8 +766,12 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
         thrust = thrustSensor.get_units();
     }
     if(torqueSensor.is_ready()){
-        torque = torqueSensor.get_units();
+        torque1 = torqueSensor.get_units();
     }
+    if(torqueSensor2.is_ready()){
+        torque2 = torqueSensor2.get_units();
+    }
+    torque = (torque1 + torque2) / 2; //final torque is the average of both sensors
 
     //read analog sensors
     voltage = getVoltage();
@@ -986,6 +1006,10 @@ void debugMenu() {
         u8g2.setCursor(1, 40); u8g2.print("VLTS: "); u8g2.print(voltage);
         u8g2.setCursor(1, 47); u8g2.print("AMPS: "); u8g2.print(current); 
         u8g2.setCursor(1, 54); u8g2.print("ASPD: "); u8g2.print(airspeed); //m/s
+
+        //right bar
+        u8g2.setCursor(66, 26); u8g2.print("TRQ1: "); u8g2.print(torque1/1000); //Nm
+        u8g2.setCursor(66, 33); u8g2.print("TRQ2: "); u8g2.print(torque2/1000); //Nm
 
         u8g2.drawStr(4, 63, "Back: *");
         u8g2.sendBuffer();    
@@ -1571,11 +1595,15 @@ void setup() {
     torqueSensor.begin(TRQ_DOUT, TRQ_CLK);
     torqueSensor.set_gain(128);
 
+    torqueSensor2.begin(TRQ2_DOUT, TRQ2_CLK);
+    torqueSensor2.set_gain(128);
+
     thrustSensor.begin(THST_DOUT, THST_CLK);
-    torqueSensor.set_gain(128);
+    thrustSensor.set_gain(128);
 
     drawLoadingScreen(30, "Thrust Sensors Zeroing");
     torqueSensor.tare();
+    torqueSensor2.tare();
     thrustSensor.tare();
 
     drawLoadingScreen(40, "Analog Zeroing");
@@ -1585,6 +1613,13 @@ void setup() {
     float torqueSensorScale;
     EEPROM.get(TRQ_CAL_ADDRESS, torqueSensorScale); 
     torqueSensor.set_scale(torqueSensorScale);
+
+    float torqueSensor2Scale;
+    EEPROM.get(TRQ2_CAL_ADDRESS, torqueSensor2Scale);
+    if (isnan(torqueSensor2Scale) || torqueSensor2Scale == 0) { //EEPROM is blank until torque sensor 2 is calibrated
+        torqueSensor2Scale = 1;
+    }
+    torqueSensor2.set_scale(torqueSensor2Scale);
 
     float thrustSensorScale;
     EEPROM.get(THST_CAL_ADDRESS, thrustSensorScale); 
