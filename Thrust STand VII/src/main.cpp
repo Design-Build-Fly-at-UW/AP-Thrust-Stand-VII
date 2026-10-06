@@ -660,7 +660,8 @@ void calibrateThrust(){//helper function for the menu, calls calibrateLoadCell
 bool loadScale(int address, HX711* loadCell){ //loads a calibration factor from EEPROM into the load cell. Returns false if there isn't a valid one saved
     float scale;
     EEPROM.get(address, scale);
-    bool valid = !isnan(scale) && !isinf(scale) && scale != 0; //blank EEPROM reads as NaN
+    //blank EEPROM reads as NaN. A scale of exactly 1 is the placeholder that old firmware could save by canceling calibration, a real calibration never lands on 1
+    bool valid = !isnan(scale) && !isinf(scale) && scale != 0 && scale != 1;
     loadCell->set_scale(valid ? scale : 1); //use 1 as a placeholder so the reading isn't NaN, it will read raw counts until calibrated
     return valid;
 }
