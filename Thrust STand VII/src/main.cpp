@@ -15,7 +15,15 @@ Pre-test info screen
 RPM Verification
 */
 
-const char* Version = "Version 1.1";
+const char* Version = "Version 1.2";
+
+//After a watchdog reset the watchdog stays on with a ~15ms timeout, which would reset the board over and over
+//before setup() finishes. This runs before setup() (and before global constructors) to turn it off.
+void disableWatchdogAtBoot() __attribute__((naked, used, section(".init3")));
+void disableWatchdogAtBoot() {
+    MCUSR = 0;
+    wdt_disable();
+}
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //FUNCTION EXTERNALS
@@ -280,7 +288,7 @@ MenuItem menus[] = {
             {231, "RPM Marker Count", TYPE_VALUE, 23, &pulsesPerRev, NULL},
             {232, "RPM Update Rate (ms)", TYPE_VALUE, 23, &rpmUpdateRate, NULL},
             {233, "A-Spd Override (m/s)", TYPE_VALUE, 23, &airspeedOverride, NULL},
-            {234, "Moving AVG Gain (0-100)", TYPE_VALUE, 23, &averageGain, NULL},
+            {234, "Moving AVG Gain (1-100)", TYPE_VALUE, 23, &averageGain, NULL},
 
     {3, "Tare Sensors", TYPE_SUBMENU, 0, NULL, NULL},
         {32, "Zero Thrust", TYPE_ACTION, 3, NULL, tareThrust},
@@ -349,7 +357,6 @@ void drawMenu(int menuId) { //pass the ID of the parent menu. Will fetch all sub
                 }
             }
 
-
             menusDrawn++; //increment the counter so we draw the next one lower
         }
     }
@@ -375,11 +382,11 @@ int getChosenMenuId(int choice) { //given an the int of the choice (1 index), th
     return -1;
 }
 
-void valueEditMenu(long* value, const char* label){ //pass this method a pointer to an int and a label to show for the int. It will give the user the UI to type in any positive integer of 8 digits or less.
+bool valueEditMenu(long* value, const char* label){ //pass this method a pointer to an int and a label to show for the int. It will give the user the UI to type in any positive integer of 8 digits or less. Returns true if accepted, false if canceled
     Serial.println("Inside value edit menu!");
     if (!value){
         Serial.println("value doesn't exist, returning");
-        return;
+        return false;
     }
 
     unsigned long startTime = millis(); //we track how long since it started so that we can time out
@@ -426,12 +433,12 @@ void valueEditMenu(long* value, const char* label){ //pass this method a pointer
             //asterisk is the cancel button
             } else if (userInput == '*') {
                 Serial.println("Cancel");
-                return;
+                return false;
             
             //pound is the confirm button
             } else if (userInput == '#') {
                 *value = input.toInt();
-                return;
+                return true;
 
             //D is the delete button
             } else if (userInput == 'D') {
@@ -545,9 +552,9 @@ void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and th
     String messageString = ("Enter Load " + units); //this has to be two lines to avoid a dangling pointer to the string, because
     const char* message = messageString.c_str();    //of how .c_str() works
 
-    valueEditMenu(&knownLoad, message); //ask user to input the calibration amount
+    bool accepted = valueEditMenu(&knownLoad, message); //ask user to input the calibration amount
 
-    if (knownLoad==0){ //if the user cancels, then don't calibrate
+    if (!accepted || knownLoad==0){ //if the user cancels (or enters 0, which can't be calibrated against), then don't calibrate
         u8g2.clearBuffer();
         u8g2.setFont(u8g2_font_t0_22b_tr);
         u8g2.drawStr(10, 39, "Canceled");
@@ -663,7 +670,7 @@ float getVoltage(){ //returns the average of averageCount voltage readings taken
     for (int i = 0; i < averageCount; i++) {
         sum = sum + analogRead(VOLTAGE_PIN); //get all of the voltages
     }
-    int voltage_value_in = sum/averageCount; //calculate the average voltage
+    float voltage_value_in = sum/averageCount; //calculate the average voltage. Kept as a float so the averaging adds resolution
 
     return (VOLTAGE_CALIBRATION * ((voltage_value_in * (Vcc / 1023.0))))-VOLTAGE_OFFSET; //this line converts back from analog 0-1023 to raw voltage, then subtracts off the offset and multiplies by calibration factor
 }
@@ -673,7 +680,7 @@ float getCurrent(){ //returns the average of averageCount voltage readings taken
     for (int i = 0; i < averageCount; i++){
         sum = sum + analogRead(CURRENT_PIN);
     }
-    int current_value_in = sum/averageCount;    
+    float current_value_in = sum/averageCount; //kept as a float so the averaging adds resolution
     float current_voltage = current_value_in * (Vcc / 1023.0); //this line converts back from analog 0-1023 to raw voltage, then subtracts off the offset and multiplies by calibration factor
     return (current_voltage/CURRENT_SENSITIVITY)-CURRENT_OFFSET; //then, the analog voltage on the current pin is converted to current
 }
@@ -687,7 +694,7 @@ float getAirspeed(){
         for (int i = 0; i < averageCount; i++){
             sum = sum + analogRead(AIRSPEED_PIN);
         }
-        int airspeed_value_in = sum/averageCount;
+        float airspeed_value_in = sum/averageCount; //kept as a float so the averaging adds resolution
         float airspeed_voltage =  airspeed_value_in * (Vcc / 1023.0); 
 
         float pressure_kPa = (airspeed_voltage - zeroVoltage) / 1.0; // Convert voltage to differential pressure in kPa
@@ -760,9 +767,13 @@ void resetSensorData(){ //call to reset all sensor state variables to 0
 
 void readSensorData(){ //call to update all of the sensor data to match most recently collected values
 
-    if (averageGain > 100 || averageGain < 0) {
+    //clamp the gain to 1-100. A gain of 0 would freeze the current reading
+    if (averageGain > 100) {
         Serial.println("Avg gain out of bounds");
-        averageGain = 0;
+        averageGain = 100;
+    } else if (averageGain < 1) {
+        Serial.println("Avg gain out of bounds");
+        averageGain = 1;
     }
 
     //read RPM
@@ -1037,7 +1048,9 @@ bool setUpTest(){//call this function to set up the file with the correct header
     esc.writeMicroseconds(MIN_THROTTLE); //set throttle to zero
 
     //ask user for test file
-    valueEditMenu(&testNumber, "Enter Test Number");
+    if (!valueEditMenu(&testNumber, "Enter Test Number")){
+        return false; //user canceled, don't start the test
+    }
 
     // Build filename: Test_Number_X.csv
     char filename[20];
@@ -1208,7 +1221,11 @@ void selectProfile(){
 void setThrottle(float throttleSetting){ //pass this a throttle from 0-100 and it will safely write it to the ESC
     int throttleMicroseconds = MIN_THROTTLE;
 
-    if (!isnan(throttleSetting) && throttleSetting <= 100 && throttleSetting >= 0){ //if the throttle is out of bounds or not a number, leave it at 0
+    if (throttleSetting > 100){ //clamp to full throttle rather than cutting the motor, float rounding can land slightly above 100
+        throttleSetting = 100;
+    }
+
+    if (!isnan(throttleSetting) && throttleSetting >= 0){ //if the throttle is negative or not a number, leave it at 0
         throttleMicroseconds = ((throttleSetting/100.0)*(MAX_THROTTLE-MIN_THROTTLE)+MIN_THROTTLE);
     }
     
@@ -1503,6 +1520,10 @@ void runBatteryTest(){
             }
         }
 
+        //keep the throttle within 0 to max, the step sizes can overshoot either end
+        if (throttle > testThrottleMax) throttle = testThrottleMax;
+        if (throttle < 0) throttle = 0;
+
         setThrottle(throttle); //set throttle once it has been adjusted
 
         Serial.println("mAH drawn: " + String(mahDrawn));
@@ -1519,7 +1540,11 @@ void runBatteryTest(){
             break; //exit the while loop
         }
 
-        delay(currentTestGain);
+        //wait out the gain time while petting the watchdog, so gains of 2s or more don't reset the board
+        unsigned long gainStart = millis();
+        while (millis() - gainStart < (unsigned long)currentTestGain) {
+            wdt_reset();
+        }
         wdt_reset();
     }
 
