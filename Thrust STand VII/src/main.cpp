@@ -55,6 +55,7 @@ float motorEfficiency = 0; //0-100%
 float propellerEfficiency = 0; //0-100%
 float systemEfficiency = 0; //0-100%
 float mahDrawn = 0;
+unsigned long lastMahTime = 0; //ms, when mAh drawn was last updated
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //SD CARD
@@ -71,14 +72,19 @@ HX711 thrustSensor;
 HX711 torqueSensor;
 HX711 torqueSensor2;
 
+
+//pin definitions for torque sensor
 #define TRQ_DOUT 48
 #define TRQ_CLK 49
 #define TRQ2_DOUT 44
 #define TRQ2_CLK 45
+
 #define TRQ_UNITS "(N.mm)"
 
+//pin definitions for the thrust sensor
 #define THST_DOUT 46
 #define THST_CLK 47
+
 #define THST_UNITS "(mN)"
 
 extern void tareTorque(); //these need to be here so the menu structure knows these exist before they're declared in the file
@@ -749,6 +755,7 @@ void resetSensorData(){ //call to reset all sensor state variables to 0
     propellerEfficiency = 0;
     systemEfficiency = 0;
     mahDrawn = 0;
+    lastMahTime = millis();
 }
 
 void readSensorData(){ //call to update all of the sensor data to match most recently collected values
@@ -780,8 +787,6 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
     //float airspeed
     airspeed = getAirspeed();
 
-
-    
     //Calculated Variables
     electricPower = abs(voltage*current); //watts
     mechanicalPower = abs(torque*RPM*0.1047/1000); //RPM is converted to Rad/S, torque is converted to N.m from N.mm
@@ -789,14 +794,17 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
     motorEfficiency = (electricPower > 0) ? abs(mechanicalPower/electricPower)*100 : 0; //percent
     propellerEfficiency = (mechanicalPower > 0) ? abs(propellerPower/mechanicalPower)*100 : 0; //percent
     systemEfficiency = (electricPower > 0) ? abs(propellerPower/electricPower)*100 : 0; //percent
-    mahDrawn += current*((float)millis() - (testTime + testStartTime))/((float)3600);
+
+    unsigned long now = millis();
+    mahDrawn += current*(now - lastMahTime)/3600.0; //amps * ms / 3600 = mAh
+    lastMahTime = now;
+    
     Serial.println(millis());
     Serial.println(current);
     Serial.println(testTime);
     Serial.println();
 
 
-    //IT IS IMPORTANT THAT TIME IS CALCULATED LAST, SINCE IT IS USED IN CALCULATION FOR MAH DRAWN
     testTime = (millis() - testStartTime);
  
 }
@@ -1349,6 +1357,7 @@ void runPiecewiseTest(){
     while(testRunning){
         wdt_enable(WDTO_2S); //enabled every run, since it gets disabled while waiting on the user between props
         wdt_reset();
+        lastMahTime = millis(); //don't count the time spent paused between props as current draw
         steppedRamp();
 
         throttle = 0;
