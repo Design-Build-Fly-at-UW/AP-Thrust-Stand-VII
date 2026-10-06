@@ -72,6 +72,7 @@ const int SD_CS_PIN = 53;     // Change if your module uses a different CS
 File dataFile; //used for the arduino to write to
 const int flushPeriodMillis = 5000; //this is how often the arduino will flush (save to the SD card) while doing a test
 unsigned long lastFlush = 0; 
+bool sdReady = false; //false if the SD card was skipped or failed at startup. Tests will try to start it again
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //LOAD CELLS
@@ -530,7 +531,7 @@ void tareLoadCell(HX711* loadCell) { //pass a load cell object, will take the us
     delay(USER_NOTIF_DELAY);
 }
 
-void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and the unit string, and will take the user through calibration
+bool calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and the unit string, and will take the user through calibration. Returns true if a new calibration was set, false if canceled
     tareLoadCell(loadCell); //start by taring
 
     //tell user to place known load
@@ -560,7 +561,7 @@ void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and th
         u8g2.drawStr(10, 39, "Canceled");
         u8g2.sendBuffer();
         delay(USER_NOTIF_DELAY);
-        return;
+        return false;
     }
 
     //tell user calibration is in progress
@@ -624,6 +625,7 @@ void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and th
 
     u8g2.sendBuffer();
     pressKeyToContinue();
+    return true;
 }
 
 void tareTorque(){
@@ -637,20 +639,31 @@ void tareThrust(){
 }
 
 void calibrateTorque(){ //helper function for the menu, calls calibrateLoadCell
-    calibrateLoadCell(&torqueSensor, TRQ_UNITS);
-    EEPROM.put(TRQ_CAL_ADDRESS, torqueSensor.get_scale()); //write the scale to EEPROM
+    if (calibrateLoadCell(&torqueSensor, TRQ_UNITS)){ //only save if the user didn't cancel, so a placeholder scale never gets saved
+        EEPROM.put(TRQ_CAL_ADDRESS, torqueSensor.get_scale()); //write the scale to EEPROM
+    }
 }
 
 void calibrateTorque2(){ //helper function for the menu, calls calibrateLoadCell
-    calibrateLoadCell(&torqueSensor2, TRQ_UNITS);
-    EEPROM.put(TRQ2_CAL_ADDRESS, torqueSensor2.get_scale()); //write the scale to EEPROM
+    if (calibrateLoadCell(&torqueSensor2, TRQ_UNITS)){ //only save if the user didn't cancel, so a placeholder scale never gets saved
+        EEPROM.put(TRQ2_CAL_ADDRESS, torqueSensor2.get_scale()); //write the scale to EEPROM
+    }
 }
 
 void calibrateThrust(){//helper function for the menu, calls calibrateLoadCell
-    calibrateLoadCell(&thrustSensor, THST_UNITS);
-    EEPROM.put(THST_CAL_ADDRESS, thrustSensor.get_scale()); //write the scale factor to EEPROM
+    if (calibrateLoadCell(&thrustSensor, THST_UNITS)){ //only save if the user didn't cancel, so a placeholder scale never gets saved
+        EEPROM.put(THST_CAL_ADDRESS, thrustSensor.get_scale()); //write the scale factor to EEPROM
+    }
 }
 
+
+bool loadScale(int address, HX711* loadCell){ //loads a calibration factor from EEPROM into the load cell. Returns false if there isn't a valid one saved
+    float scale;
+    EEPROM.get(address, scale);
+    bool valid = !isnan(scale) && !isinf(scale) && scale != 0; //blank EEPROM reads as NaN
+    loadCell->set_scale(valid ? scale : 1); //use 1 as a placeholder so the reading isn't NaN, it will read raw counts until calibrated
+    return valid;
+}
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //ANALOG SENSOR FUNCTIONS
@@ -719,7 +732,7 @@ void zeroAnalog(){
     CURRENT_OFFSET = CURRENT_OFFSET + findAnalogOffset(getCurrent);
 }
 
-int getRPM() { //returns RPM. Updates once per rpm update ms
+float getRPM() { //returns RPM. Updates once per rpm update ms
 
     if ((unsigned long)(millis() - lastRpmReadTime) <= (unsigned long)rpmUpdateRate) { //cast to unsigned to shut up compiler
         Serial.println("RPM not ready");
@@ -734,7 +747,8 @@ int getRPM() { //returns RPM. Updates once per rpm update ms
     lastRpmReadTime = millis();
     interrupts();
    
-    return (float)(pulseCount*60000.0)/(period*2.0*pulsesPerRev); //return a float. The multiplication of 2 of the period is because pulses are counted on rising and falling.
+    long markers = (pulsesPerRev < 1) ? 1 : pulsesPerRev; //avoid dividing by zero if the marker count is set to 0
+    return (float)(pulseCount*60000.0)/(period*2.0*markers); //return a float. The multiplication of 2 of the period is because pulses are counted on rising and falling.
 }
 
 
@@ -1044,12 +1058,42 @@ void debugMenu() {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //SD CARD FUNCTIONS
+
+void drawErrorScreen(const char* title, const char* line1, const char* line2){ //shows an error message on screen
+    u8g2.clearBuffer();
+    u8g2.setFontMode(1);
+    u8g2.setBitmapMode(1);
+    u8g2.setFont(u8g2_font_t0_14b_tr);
+    u8g2.drawStr(2, 15, title);
+    u8g2.drawLine(0, 18, 127, 18);
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(2, 32, line1);
+    u8g2.drawStr(2, 42, line2);
+    u8g2.sendBuffer();
+}
 bool setUpTest(){//call this function to set up the file with the correct headers. Returns true on a successful setup. Also prompts the user to initiate the test. Begin the test right after a succesful call.
     esc.writeMicroseconds(MIN_THROTTLE); //set throttle to zero
+
+    //if the card was skipped or missing at startup, try again now in case it has been inserted since
+    if (!sdReady){
+        sdReady = SD.begin(SD_CS_PIN);
+        if (!sdReady){
+            drawErrorScreen("SD Card Error", "No SD card found.", "Insert card and retry.");
+            delay(USER_NOTIF_DELAY);
+            return false;
+        }
+    }
 
     //ask user for test file
     if (!valueEditMenu(&testNumber, "Enter Test Number")){
         return false; //user canceled, don't start the test
+    }
+
+    //the SD library only allows 8 character file names, and "Test_" uses 5 of them, so the number can be at most 3 digits
+    if (testNumber > 999){
+        drawErrorScreen("Invalid Number", "Test number must be", "between 0 and 999.");
+        delay(USER_NOTIF_DELAY);
+        return false;
     }
 
     // Build filename: Test_Number_X.csv
@@ -1084,6 +1128,9 @@ bool setUpTest(){//call this function to set up the file with the correct header
     dataFile = SD.open(filename, FILE_WRITE);
     if (!dataFile) {
         Serial.println("Failed to create file!");
+        drawErrorScreen("SD Card Error", "Could not create file.", "Check the SD card.");
+        delay(USER_NOTIF_DELAY);
+        sdReady = false; //the card may have been removed, so re-initialize it next time
         return false;
     }
 
@@ -1625,8 +1672,23 @@ void setup() {
     pinMode(53, OUTPUT);
     pinMode(SD_CS_PIN, OUTPUT);
 
-    while (!SD.begin(SD_CS_PIN)) {
+    //keep retrying until a card is found, or the user presses a key to continue without one (for calibration or debugging)
+    while (!(sdReady = SD.begin(SD_CS_PIN))) {
         Serial.println("SD card initialization failed!");
+        drawErrorScreen("SD Card Error", "No SD card found. Insert", "one, or press any key to skip.");
+
+        //watch the keypad for a second between attempts, since SD.begin is slow to fail and would miss key presses
+        bool skipSD = false;
+        unsigned long waitStart = millis();
+        while (millis() - waitStart < 1000) {
+            if (customKeypad.getKey() != NO_KEY) {
+                skipSD = true;
+                break;
+            }
+        }
+        if (skipSD) {
+            break;
+        }
     }
 
     drawLoadingScreen(20, "Force Sensor Initialization");
@@ -1648,21 +1710,28 @@ void setup() {
     CURRENT_OFFSET = findAnalogOffset(getCurrent); //no current is flowing at startup, so this is the sensor's zero point
 
     drawLoadingScreen(50, "Loading Calibration Factors");
-    float torqueSensorScale;
-    EEPROM.get(TRQ_CAL_ADDRESS, torqueSensorScale); 
-    torqueSensor.set_scale(torqueSensorScale);
+    bool thrustCalibrated = loadScale(THST_CAL_ADDRESS, &thrustSensor);
+    bool torque1Calibrated = loadScale(TRQ_CAL_ADDRESS, &torqueSensor);
+    bool torque2Calibrated = loadScale(TRQ2_CAL_ADDRESS, &torqueSensor2);
 
-    float torqueSensor2Scale;
-    EEPROM.get(TRQ2_CAL_ADDRESS, torqueSensor2Scale);
-    if (isnan(torqueSensor2Scale) || torqueSensor2Scale == 0) { //EEPROM is blank until torque sensor 2 is calibrated
-        torqueSensor2Scale = 1;
+    //warn the user about any sensor without a saved calibration, since it will read raw counts instead of real units
+    if (!thrustCalibrated || !torque1Calibrated || !torque2Calibrated){
+        u8g2.clearBuffer();
+        u8g2.setFontMode(1);
+        u8g2.setBitmapMode(1);
+        u8g2.setFont(u8g2_font_t0_14b_tr);
+        u8g2.drawStr(2, 15, "Not Calibrated:");
+        u8g2.drawLine(0, 18, 127, 18);
+        u8g2.setFont(u8g2_font_5x7_tr);
+        int y = 28;
+        if (!thrustCalibrated) { u8g2.drawStr(2, y, "- Thrust Sensor"); y += 9; }
+        if (!torque1Calibrated) { u8g2.drawStr(2, y, "- Torque 1"); y += 9; }
+        if (!torque2Calibrated) { u8g2.drawStr(2, y, "- Torque 2"); y += 9; }
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(2, 63, "Press any key to continue...");
+        u8g2.sendBuffer();
+        pressKeyToContinue();
     }
-    torqueSensor2.set_scale(torqueSensor2Scale);
-
-    float thrustSensorScale;
-    EEPROM.get(THST_CAL_ADDRESS, thrustSensorScale); 
-    Serial.println(thrustSensorScale);
-    thrustSensor.set_scale(thrustSensorScale);
 }
 
 //loop draws a menu and allows for navigation. Once something is selected, it does that function, then continues looping. 
