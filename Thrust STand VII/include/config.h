@@ -29,8 +29,8 @@
 
 #define TRQ_DOUT 48
 #define TRQ_CLK 49
-#define TRQ2_DOUT 44
-#define TRQ2_CLK 45
+#define TRQ2_DOUT 40
+#define TRQ2_CLK 41
 #define TRQ_UNITS "(N.mm)"
 
 #define THST_DOUT 46
