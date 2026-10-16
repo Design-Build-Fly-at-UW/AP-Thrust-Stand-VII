@@ -50,7 +50,7 @@ void setup() {
     drawLoadingScreen(20, "Force Sensor Initialization");
     beginLoadCells();
 
-    drawLoadingScreen(30, "Thrust Sensors Zeroing");
+    drawLoadingScreen(30, "Load Cells Zeroing");
     tareAllLoadCells();
 
     drawLoadingScreen(40, "Current Sensor Zeroing");
