@@ -340,6 +340,7 @@ void debugMenu() {
         u8g2.setCursor(1, 54); u8g2.print("ASPD: "); u8g2.print(readings.airspeed); //m/s
 
         //right column
+        u8g2.setCursor(66, 19); u8g2.print("RPM: "); u8g2.print(readings.rpm, 0); //calculated from the sensor pulses
         u8g2.setCursor(66, 26); u8g2.print("TRQ1: "); u8g2.print(readings.torque1/1000); //Nm
         u8g2.setCursor(66, 33); u8g2.print("TRQ2: "); u8g2.print(readings.torque2/1000); //Nm
 

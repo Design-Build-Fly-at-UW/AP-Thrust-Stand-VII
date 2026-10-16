@@ -53,6 +53,9 @@ const int ANALOG_AVERAGE_COUNT = 40; //how many analog readings are averaged for
 //RPM SENSOR
 
 #define RPM_PIN 2 //must be an interrupt pin
+#define RPM_EDGE RISING //the one edge counted per marker. Pick the one that starts the shorter part of the cycle (marker vs gap)
+#define RPM_MIN_LOCKOUT_US 100 //lockout never goes below this, so one bad edge can't let a whole burst of chatter through
+#define RPM_MAX_LOCKOUT_US 50000 //lockout used when slow or stopped. A motor starting up locks on within a few markers
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //AIRSPEED SENSOR
