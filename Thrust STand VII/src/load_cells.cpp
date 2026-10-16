@@ -20,10 +20,36 @@ void beginLoadCells(){
     thrustSensor.set_gain(128);
 }
 
-void tareAllLoadCells(){
-    torqueSensor.tare();
-    torqueSensor2.tare();
-    thrustSensor.tare();
+//the HX711 library blocks forever waiting for a sample, so check a sensor is sending data before reading it
+static bool loadCellResponding(HX711* loadCell){
+    return loadCell->wait_ready_timeout(LOAD_CELL_TIMEOUT);
+}
+
+//replaces HX711::tare(), which waits forever on every sample. Checks before each sample, since a floating DOUT pin
+//can look ready once and then never again. Returns false (leaving the old offset) if the sensor stops responding
+static bool tareWithTimeout(HX711* loadCell){
+    const byte samples = 10;
+    long sum = 0;
+    for (byte i = 0; i < samples; i++) {
+        if (!loadCellResponding(loadCell)) return false;
+        sum += loadCell->read();
+    }
+    loadCell->set_offset(sum / samples);
+    return true;
+}
+
+//whether each sensor answered at startup, so loadCalibrations() can warn about it
+static bool thrustConnected = false;
+static bool torque1Connected = false;
+static bool torque2Connected = false;
+
+void tareAllLoadCells(){ //skips any sensor that isn't sending data so startup doesn't hang
+    torque1Connected = tareWithTimeout(&torqueSensor);
+    Serial.print(F("Torque 1 tare: ")); Serial.println(torque1Connected ? F("ok") : F("no response"));
+    torque2Connected = tareWithTimeout(&torqueSensor2);
+    Serial.print(F("Torque 2 tare: ")); Serial.println(torque2Connected ? F("ok") : F("no response"));
+    thrustConnected = tareWithTimeout(&thrustSensor);
+    Serial.print(F("Thrust tare: ")); Serial.println(thrustConnected ? F("ok") : F("no response"));
 }
 
 static bool loadScale(int address, HX711* loadCell){ //loads a calibration factor from EEPROM into the load cell. Returns false if there isn't a valid one saved
@@ -40,9 +66,10 @@ void loadCalibrations(){
     bool torque1Calibrated = loadScale(TRQ_CAL_ADDRESS, &torqueSensor);
     bool torque2Calibrated = loadScale(TRQ2_CAL_ADDRESS, &torqueSensor2);
 
-    //warn the user about any sensor without a saved calibration, since it will read raw counts instead of real units
-    if (!thrustCalibrated || !torque1Calibrated || !torque2Calibrated){
-        drawCalibrationWarning(thrustCalibrated, torque1Calibrated, torque2Calibrated);
+    //warn the user about any sensor that isn't connected, or without a saved calibration (it will read raw counts instead of real units)
+    bool allOk = thrustConnected && torque1Connected && torque2Connected && thrustCalibrated && torque1Calibrated && torque2Calibrated;
+    if (!allOk){
+        drawSensorWarning(thrustConnected, thrustCalibrated, torque1Connected, torque1Calibrated, torque2Connected, torque2Calibrated);
         pressKeyToContinue();
     }
 }
@@ -50,7 +77,18 @@ void loadCalibrations(){
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //TARE AND CALIBRATION FLOWS
 
-static void tareLoadCell(HX711* loadCell) { //pass a load cell object, will take the user through taring the load cell
+static void drawNoSensor(){ //tells the user the load cell isn't sending data
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_t0_16b_tr);
+    u8g2.drawStr(3, 15, "No sensor");
+    u8g2.drawStr(3, 27, "detected.");
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(3, 44, "Check the load cell wiring.");
+    u8g2.sendBuffer();
+    delay(USER_NOTIF_DELAY);
+}
+
+static bool tareLoadCell(HX711* loadCell) { //pass a load cell object, will take the user through taring the load cell. Returns false if the sensor isn't responding
 
     //prompt the user to remove load from the load cell
     u8g2.clearBuffer();
@@ -71,12 +109,16 @@ static void tareLoadCell(HX711* loadCell) { //pass a load cell object, will take
     u8g2.drawStr(14, 39, "Taring...");
     u8g2.sendBuffer();
 
-    loadCell->tare();
+    if (!tareWithTimeout(loadCell)){
+        drawNoSensor();
+        return false;
+    }
     delay(USER_NOTIF_DELAY);
+    return true;
 }
 
 static bool calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and the unit string, and will take the user through calibration. Returns true if a new calibration was set, false if canceled
-    tareLoadCell(loadCell); //start by taring
+    if (!tareLoadCell(loadCell)) return false; //start by taring, and give up if the sensor isn't there
 
     //tell user to place known load
     u8g2.clearBuffer();
@@ -118,6 +160,10 @@ static bool calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell
     long maxVal = 0;
 
     for (int i = 0; i < N; i++) {
+        if (!loadCellResponding(loadCell)){ //sensor dropped out partway through, don't calibrate against bad data
+            drawNoSensor();
+            return false;
+        }
         long v = loadCell->get_value(); //blocks until fresh sample. Important that it's get value, since that is with offset
         Serial.println(v);
         sum += v;
@@ -164,7 +210,10 @@ void tareThrust(){
 
 void tareTorque(){
     tareLoadCell(&torqueSensor);
-    torqueSensor2.tare(); //both torque sensors are unloaded at this point, so tare the second one too
+}
+
+void tareTorque2(){
+    tareLoadCell(&torqueSensor2);
 }
 
 //each of these only saves if the user didn't cancel, so a placeholder scale never gets saved

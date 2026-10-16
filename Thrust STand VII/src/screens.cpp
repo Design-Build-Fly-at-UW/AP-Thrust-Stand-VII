@@ -88,18 +88,25 @@ void drawErrorScreen(const char* title, const char* line1, const char* line2){
     u8g2.sendBuffer();
 }
 
-void drawCalibrationWarning(bool thrustCalibrated, bool torque1Calibrated, bool torque2Calibrated){
+static void drawSensorProblem(int* y, const char* name, bool connected, bool calibrated){ //draws one line if the sensor has a problem, and moves y down
+    if (connected && calibrated) return;
+    u8g2.drawStr(2, *y, name);
+    u8g2.drawStr(50, *y, connected ? "not calibrated" : "not connected"); //not connected matters more, so it wins if both
+    *y += 9;
+}
+
+void drawSensorWarning(bool thrustConnected, bool thrustCalibrated, bool torque1Connected, bool torque1Calibrated, bool torque2Connected, bool torque2Calibrated){
     u8g2.clearBuffer();
     u8g2.setFontMode(1);
     u8g2.setBitmapMode(1);
     u8g2.setFont(u8g2_font_t0_14b_tr);
-    u8g2.drawStr(2, 15, "Not Calibrated:");
+    u8g2.drawStr(2, 15, "Sensor Warning:");
     u8g2.drawLine(0, 18, 127, 18);
     u8g2.setFont(u8g2_font_5x7_tr);
     int y = 28;
-    if (!thrustCalibrated) { u8g2.drawStr(2, y, "- Thrust Sensor"); y += 9; }
-    if (!torque1Calibrated) { u8g2.drawStr(2, y, "- Torque 1"); y += 9; }
-    if (!torque2Calibrated) { u8g2.drawStr(2, y, "- Torque 2"); y += 9; }
+    drawSensorProblem(&y, "Thrust", thrustConnected, thrustCalibrated);
+    drawSensorProblem(&y, "Torque 1", torque1Connected, torque1Calibrated);
+    drawSensorProblem(&y, "Torque 2", torque2Connected, torque2Calibrated);
     u8g2.setFont(u8g2_font_4x6_tr);
     u8g2.drawStr(2, 63, "Press any key to continue...");
     u8g2.sendBuffer();

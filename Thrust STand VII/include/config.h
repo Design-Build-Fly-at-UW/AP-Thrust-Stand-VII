@@ -8,6 +8,7 @@
 //UI
 
 #define USER_NOTIF_DELAY 1800 //ms, how long notification screens stay up
+#define LOAD_CELL_TIMEOUT 500 //ms to wait for an HX711 sample before treating the sensor as disconnected (it samples at 10Hz)
 
 //keypad pins are in screens.cpp, next to the key layout
 

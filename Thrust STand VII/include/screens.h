@@ -13,7 +13,7 @@ bool waitForConfirm(); //waits for # (returns true) or * (returns false), ignori
 //general screens
 void drawLoadingScreen(int loadPercent, const char* message); //pass load percent as an int from 0-100
 void drawErrorScreen(const char* title, const char* line1, const char* line2);
-void drawCalibrationWarning(bool thrustCalibrated, bool torque1Calibrated, bool torque2Calibrated);
+void drawSensorWarning(bool thrustConnected, bool thrustCalibrated, bool torque1Connected, bool torque1Calibrated, bool torque2Connected, bool torque2Calibrated);
 void drawProfileSelection();
 
 //test setup screens. Each returns true if the user pressed # to continue, false if they pressed * to go back

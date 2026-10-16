@@ -66,7 +66,8 @@ static MenuItem menus[] = {
 
     {3, "Tare Sensors", TYPE_SUBMENU, 0, NULL, NULL},
         {32, "Zero Thrust", TYPE_ACTION, 3, NULL, tareThrust},
-        {33, "Zero Torque", TYPE_ACTION, 3, NULL, tareTorque},
+        {33, "Zero Torque 1", TYPE_ACTION, 3, NULL, tareTorque},
+        {38, "Zero Torque 2", TYPE_ACTION, 3, NULL, tareTorque2},
         {34, "Calibrate Thrust Sensor", TYPE_ACTION, 3, NULL, calibrateThrust},
         {35, "Calibrate Torque 1", TYPE_ACTION, 3, NULL, calibrateTorque},
         {37, "Calibrate Torque 2", TYPE_ACTION, 3, NULL, calibrateTorque2},
@@ -123,7 +124,7 @@ static void drawMenu(int menuId) { //pass the ID of the parent menu. Will draw i
         }
     }
 
-    u8g2.drawStr(4, 63, "Back: *");
+    u8g2.drawStr(126 - u8g2.getStrWidth("Back: *"), 63, "Back: *"); //right aligned so it doesn't collide with a 7th item
     u8g2.sendBuffer();
 }
 

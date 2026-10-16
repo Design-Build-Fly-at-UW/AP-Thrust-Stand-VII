@@ -8,11 +8,12 @@ extern HX711 torqueSensor2;
 
 void beginLoadCells(); //sets up the pins and gain on all three HX711 boards
 void tareAllLoadCells(); //zeroes all three load cells, with no user prompts
-void loadCalibrations(); //loads the calibration factors from EEPROM, and warns the user about any sensor that isn't calibrated
+void loadCalibrations(); //loads the calibration factors from EEPROM, and warns the user about any sensor that isn't connected or calibrated. Call after tareAllLoadCells()
 
 //menu actions. These walk the user through the process on screen
 void tareThrust();
 void tareTorque();
+void tareTorque2();
 void calibrateThrust();
 void calibrateTorque();
 void calibrateTorque2();
