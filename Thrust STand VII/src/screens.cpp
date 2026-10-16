@@ -91,7 +91,9 @@ void drawErrorScreen(const char* title, const char* line1, const char* line2){
 static void drawSensorProblem(int* y, const char* name, bool connected, bool calibrated){ //draws one line if the sensor has a problem, and moves y down
     if (connected && calibrated) return;
     u8g2.drawStr(2, *y, name);
-    u8g2.drawStr(50, *y, connected ? "not calibrated" : "not connected"); //not connected matters more, so it wins if both
+    //no HX711 data: the board sent no samples (a missing load cell still sends data). This matters more, so it wins if both
+    //no calibration: no calibration factor in EEPROM, so the sensor reads raw counts
+    u8g2.drawStr(50, *y, connected ? "no calibration" : "no HX711 data");
     *y += 9;
 }
 
