@@ -46,14 +46,15 @@
 
 const float Vcc = 5.0; //change to match VCC logic voltage of board
 const float CURRENT_SENSITIVITY = 0.020; //V/A
-const float VOLTAGE_CALIBRATION = 21; //voltage divider ratio
+const float VOLTAGE_CALIBRATION = 20.24; //voltage divider ratio. Nominally 21, calibrated against a multimeter at ~24.7V
 const int ANALOG_AVERAGE_COUNT = 40; //how many analog readings are averaged for each sensor reading
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //RPM SENSOR
 
 #define RPM_PIN 2 //must be an interrupt pin
-#define RPM_EDGE RISING //the one edge counted per marker. Pick the one that starts the shorter part of the cycle (marker vs gap)
+#define RPM_MARKER_LEVEL HIGH //pin level while the sensor sees the marker. Only the switch to this level is counted
+#define RPM_SETTLE_US 200 //the pin must be off the marker level this long before a switch counts, which ignores the ~30us edge spikes
 #define RPM_MIN_LOCKOUT_US 100 //lockout never goes below this, so one bad edge can't let a whole burst of chatter through
 #define RPM_MAX_LOCKOUT_US 50000 //lockout used when slow or stopped. A motor starting up locks on within a few markers
 
