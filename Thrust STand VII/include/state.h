@@ -49,7 +49,7 @@ struct TestSettings {
 
 //Hardware settings, edited from the Configure Hardware menu
 struct HardwareSettings {
-    long pulsesPerRev = 4; //number of RPM markers
+    long pulsesPerRev = 1; //number of RPM markers
     long rpmUpdateRate = 250; //ms between RPM updates
     long airspeedOverride = 0; //m/s, 0 = use the airspeed sensor
     long averageGain = 25; //1-100, how strongly new current readings are weighted in the moving average
