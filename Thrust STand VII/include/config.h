@@ -30,12 +30,12 @@
 
 #define TRQ_DOUT 48
 #define TRQ_CLK 49
-#define TRQ2_DOUT 40
-#define TRQ2_CLK 41
+#define TRQ2_DOUT 46
+#define TRQ2_CLK 47
 #define TRQ_UNITS "(N.mm)"
 
-#define THST_DOUT 46
-#define THST_CLK 47
+#define THST_DOUT 40
+#define THST_CLK 41
 #define THST_UNITS "(mN)"
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
