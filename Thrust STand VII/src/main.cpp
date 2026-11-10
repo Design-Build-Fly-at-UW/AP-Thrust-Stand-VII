@@ -73,12 +73,12 @@ HX711 torqueSensor2;
 
 #define TRQ_DOUT 48
 #define TRQ_CLK 49
-#define TRQ2_DOUT 44
-#define TRQ2_CLK 45
+#define TRQ2_DOUT 46
+#define TRQ2_CLK 47
 #define TRQ_UNITS "(N.mm)"
 
-#define THST_DOUT 46
-#define THST_CLK 47
+#define THST_DOUT 40
+#define THST_CLK 41
 #define THST_UNITS "(mN)"
 
 extern void tareTorque(); //these need to be here so the menu structure knows these exist before they're declared in the file
